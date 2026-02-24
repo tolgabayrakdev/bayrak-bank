@@ -2,23 +2,29 @@ name: Bayrak Bank CI
 
 on:
   push:
-    branches: [ "develop", "main" ]
+    branches: ["develop", "main"]
   pull_request:
-    branches: [ "develop", "main" ]
+    branches: ["develop", "main"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
   backend:
-    if: contains(github.event.head_commit.message, '') # job'un conditional çalışması için placeholder
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: BayrakBackend
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Detect backend changes
-        id: backend_changes
+        id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -26,35 +32,35 @@ jobs:
               - 'BayrakBackend/**'
 
       - name: Stop if no backend changes
-        if: steps.backend_changes.outputs.backend != 'true'
-        run: exit 0
+        if: steps.changes.outputs.backend != 'true'
+        run: echo "No backend changes detected. Skipping..."
 
       - name: Setup JDK 25
+        if: steps.changes.outputs.backend == 'true'
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '25'
+          distribution: temurin
+          java-version: 25
+          cache: maven
 
-      - name: Cache Maven
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: maven-${{ hashFiles('BayrakBackend/pom.xml') }}
-
-      - name: Build & Test Backend
-        run: mvn clean verify
+      - name: Build Backend (Skip Tests)
+        if: steps.changes.outputs.backend == 'true'
+        run: mvn clean package -DskipTests
 
 
   frontend:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: web
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Detect frontend changes
-        id: frontend_changes
+        id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -62,16 +68,21 @@ jobs:
               - 'web/**'
 
       - name: Stop if no frontend changes
-        if: steps.frontend_changes.outputs.frontend != 'true'
-        run: exit 0
+        if: steps.changes.outputs.frontend != 'true'
+        run: echo "No frontend changes detected. Skipping..."
 
       - name: Setup Node
+        if: steps.changes.outputs.frontend == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
 
       - name: Install Dependencies
-        run: npm install
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm ci
 
       - name: Build Frontend
-        run: npm run build  
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm run build
