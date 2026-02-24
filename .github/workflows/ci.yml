@@ -1,0 +1,88 @@
+name: Bayrak Bank CI
+
+on:
+  push:
+    branches: ["develop", "main"]
+  pull_request:
+    branches: ["develop", "main"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  backend:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: BayrakBackend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect backend changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'BayrakBackend/**'
+
+      - name: Stop if no backend changes
+        if: steps.changes.outputs.backend != 'true'
+        run: echo "No backend changes detected. Skipping..."
+
+      - name: Setup JDK 25
+        if: steps.changes.outputs.backend == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      - name: Build Backend (Skip Tests)
+        if: steps.changes.outputs.backend == 'true'
+        run: mvn clean package -DskipTests
+
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect frontend changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'web/**'
+
+      - name: Stop if no frontend changes
+        if: steps.changes.outputs.frontend != 'true'
+        run: echo "No frontend changes detected. Skipping..."
+
+      - name: Setup Node
+        if: steps.changes.outputs.frontend == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Dependencies
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm ci
+
+      - name: Build Frontend
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm run build
