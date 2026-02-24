@@ -1,0 +1,77 @@
+name: Bayrak Bank CI
+
+on:
+  push:
+    branches: [ "develop", "main" ]
+  pull_request:
+    branches: [ "develop", "main" ]
+
+jobs:
+
+  backend:
+    if: contains(github.event.head_commit.message, '') # job'un conditional çalışması için placeholder
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: BayrakBackend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect backend changes
+        id: backend_changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'BayrakBackend/**'
+
+      - name: Stop if no backend changes
+        if: steps.backend_changes.outputs.backend != 'true'
+        run: exit 0
+
+      - name: Setup JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Cache Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: maven-${{ hashFiles('BayrakBackend/pom.xml') }}
+
+      - name: Build & Test Backend
+        run: mvn clean verify
+
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect frontend changes
+        id: frontend_changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'web/**'
+
+      - name: Stop if no frontend changes
+        if: steps.frontend_changes.outputs.frontend != 'true'
+        run: exit 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Frontend
+        run: npm run build  
