@@ -14,6 +14,7 @@ Kullanicilarin hesap actirabilecegi, para transferi yapabilecegi ve bildirim ala
 | Backend     | Java 21 + Spring Boot 3.x         |
 | Frontend    | React 19 + Vite + TypeScript      |
 | Veritabani  | PostgreSQL 16                     |
+| Cache/Queue | Redis (notification queue)        |
 | Guvenlik    | Spring Security + JWT (Access + Refresh Token) |
 | Build       | Maven (backend) / npm (frontend)  |
 
@@ -91,6 +92,14 @@ bayrak-bank/
 │       │   ├── CorsConfig.java
 │       │   └── MailConfig.java
 │       │
+│       ├── event/
+│       │   ├── AppEvent.java
+│       │   ├── EventPublisher.java
+│       │   ├── EventConsumer.java
+│       │   ├── EventHandler.java
+│       │   ├── NotificationEvent.java
+│       │   └── NotificationHandler.java
+│       │
 │       ├── exception/
 │       │   ├── GlobalExceptionHandler.java
 │       │   ├── ResourceNotFoundException.java
@@ -142,13 +151,92 @@ bayrak-bank/
 - Yetersiz bakiye kontrolu
 - Ayni hesap transferi engeli
 
-### 4. Bildirim Sistemi
+### 4. Bildirim Sistemi (Event-Driven)
 - In-app bildirimler (veritabani tabanli)
 - Email bildirimleri (Spring Mail / JavaMailSender)
   - Kayit onay maili
   - Transfer bildirim maili
   - Sifre degisiklik maili
 - Bildirim listesi ve okundu isaretleme
+- **Redis Queue ile async notification**: Event-driven mimari
+
+#### Event-Driven Notification Mimarisi (Generic Pattern)
+```
+┌─────────────┐    ┌────────────────┐    ┌───────────┐    ┌───────────────┐    ┌─────────────┐
+│   Service   │ -> │ EventPublisher │ -> │ Redis     │ -> │ EventConsumer │ -> │   Handler   │
+│             │    │                │    │ Queue     │    │ (type'e göre) │    │ (xxxHandler)│
+└─────────────┘    └────────────────┘    └───────────┘    └───────────────┘    └─────────────┘
+```
+
+**Generic Event Sınıfları:**
+
+| Sınıf | İşlev |
+|-------|-------|
+| `AppEvent` | Generic event record (type, payload) |
+| `EventPublisher` | Redis'e event yayınlar |
+| `EventConsumer` | Event'leri dinler, type'a göre handler'a yönlendirir |
+| `EventHandler` | Handler interface'i - tüm handler'lar bunu implement eder |
+
+**Event Handler'lar:**
+
+| Handler | Event Type | İşlev |
+|---------|------------|-------|
+| `NotificationHandler` | `NOTIFICATION` | Bildirim oluşturur, DB'ye kaydeder |
+
+> **Yeni Handler Ekleme:** Sadece `EventHandler` implement edip Spring bean olarak kaydet yeterli. Consumer otomatik bulur.
+
+**Kullanım:**
+```java
+eventPublisher.publish("NOTIFICATION", notificationEvent);
+// veya
+notificationService.publishNotification(userId, "Başlık", "Mesaj", NotificationType.INFO);
+```
+
+**Redis Konfigürasyonu (application.properties):**
+```properties
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+```
+
+#### Email Gönderme Akışı (Spring @Async)
+
+```
+Service (@Async) → TaskExecutor Thread Pool → JavaMailSender → SMTP (Gmail) → Kullanıcı
+```
+
+**Adımlar:**
+1. Service `emailService.sendWelcomeEmail()` çağırır
+2. `@Async` annotation'ı ile ayrı thread'te çalışır
+3. Spring'in `TaskExecutor` pool'undan thread alır (core=2, max=5)
+4. `JavaMailSender` ile Gmail SMTP'ye bağlanır
+5. Email gönderilir
+
+**EmailService Metodları:**
+- `sendWelcomeEmail(toEmail, firstName)` - Kayıt sonrası hoş geldin
+- `sendTransferEmail(toEmail, firstName, referenceNo, amount)` - Transfer bildirimi
+- `sendPasswordChangedEmail(toEmail, firstName)` - Şifre değişikliği
+
+#### Notification Event-Driven Akışı (Redis Queue)
+
+```
+Service → NotificationEvent → Redis Queue (RPUSH) → Consumer → Database
+```
+
+**Neden Event-Driven?**
+- **Decoupling**: Üretici service ile tüketici ayrıdır
+- **Async Processing**: Kullanıcı işlemi beklemez, notification queue'ya yazılır
+- **Scalability**: Consumer sayısı artırılabilir
+- **Reliability**: Redis'te mesaj kalıcıdır (restart olsa bile)
+
+**Akış Detayı:**
+1. `UserService.changePassword()` çağrılır
+2. `notificationService.publishNotification()` → `NotificationQueuePublisher`
+3. Event JSON olarak Redis'e yazılır: `RPUSH notification:queue '{"userId":"...","title":"...","message":"..."}'`
+4. `NotificationConsumer` sürekli dinler: `LPOP notification:queue`
+5. Event deserialize edilir, user bilgisi alınır
+6. `NotificationService.createNotification()` → DB'ye kaydedilir
+
+**Not:** Email için Redis kullanılmıyor, Spring'in `@Async` yeterli. Redis sadece notification için kullanılıyor.
 
 ---
 
@@ -337,19 +425,31 @@ Controller -> Service -> Repository -> PostgreSQL
 
 ## Ortam Degiskenleri
 
-### Backend (`application.properties`)
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/bayrakbank
-spring.datasource.username=postgres
-spring.datasource.password=postgres
-spring.jpa.hibernate.ddl-auto=update
-jwt.secret=<base64-encoded-secret>
-jwt.access-token-expiry=900000
-jwt.refresh-token-expiry=604800000
-spring.mail.host=smtp.gmail.com
-spring.mail.port=587
-spring.mail.username=<email>
-spring.mail.password=<app-password>
+### Backend Configuration
+
+**Profile Yapısı:**
+- `application.properties` - Base config (JPA gibi ortak ayarlar)
+- `application-dev.properties` - Local geliştirme (sensitiveler dahil, GitHub'a pushlanmaz)
+- `application-prod.properties` - Production (environment variable'lar)
+
+**Kullanım:**
+```bash
+# Development (default)
+./mvnw spring-boot:run
+
+# Production
+SPRING_PROFILES_ACTIVE=prod \
+DB_URL=jdbc:postgresql://... \
+JWT_SECRET=... \
+./mvnw spring-boot:run
+```
+
+**Environment Variables (Production):**
+```bash
+DB_URL, DB_USERNAME, DB_PASSWORD
+JWT_SECRET
+MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD
+REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
 ```
 
 ### Frontend (`.env`)
@@ -366,6 +466,7 @@ VITE_API_BASE_URL=http://localhost:8080/api
 - Maven 3.8+
 - Node.js 20+
 - PostgreSQL 16
+- Redis (notification queue için)
 - (Opsiyonel) Docker
 
 ### Baslangic
@@ -386,4 +487,9 @@ npm run dev
 **PostgreSQL veritabani olusturma:**
 ```sql
 CREATE DATABASE bayrakbank;
+```
+
+**Redis (Docker ile):**
+```bash
+docker run -d -p 6379:6379 --name redis redis:alpine
 ```
