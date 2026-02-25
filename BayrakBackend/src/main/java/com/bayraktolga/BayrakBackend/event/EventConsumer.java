@@ -1,52 +1,57 @@
 package com.bayraktolga.BayrakBackend.event;
 
-import com.bayraktolga.BayrakBackend.service.NotificationService;
-import com.bayraktolga.BayrakBackend.service.UserService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
-public class NotificationConsumer {
+public class EventConsumer {
 
-    private static final String NOTIFICATION_QUEUE = "notification:queue";
+    private static final String EVENT_QUEUE = "event:queue";
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    private final NotificationService notificationService;
-    private final UserService userService;
+    private final List<EventHandler> handlers;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean running = new AtomicBoolean(false);
+
+    public EventConsumer(StringRedisTemplate redisTemplate, 
+                        ObjectMapper objectMapper, 
+                        List<EventHandler> handlers) {
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
+        this.handlers = handlers;
+    }
 
     @PostConstruct
     public void startConsuming() {
         running.set(true);
         executor.submit(this::consume);
-        log.info("Notification consumer started");
+        log.info("Event consumer started with {} handlers", handlers.size());
     }
 
     @PreDestroy
     public void stopConsuming() {
         running.set(false);
         executor.shutdown();
-        log.info("Notification consumer stopped");
+        log.info("Event consumer stopped");
     }
 
     private void consume() {
         while (running.get()) {
             try {
-                String json = redisTemplate.opsForList().leftPop(NOTIFICATION_QUEUE);
+                String json = redisTemplate.opsForList().leftPop(EVENT_QUEUE);
                 if (json != null) {
                     processMessage(json);
                 } else {
@@ -56,19 +61,27 @@ public class NotificationConsumer {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                log.error("Error consuming notification message", e);
+                log.error("Error consuming event", e);
             }
         }
     }
 
     private void processMessage(String json) {
         try {
-            NotificationEvent event = objectMapper.readValue(json, NotificationEvent.class);
-            var user = userService.findUserById(event.getUserId());
-            notificationService.createNotification(user, event.getTitle(), event.getMessage(), event.getType());
-            log.info("Notification processed for user: {}", event.getUserId());
+            AppEvent event = objectMapper.readValue(json, AppEvent.class);
+            
+            for (EventHandler handler : handlers) {
+                if (handler.getEventType().equals(event.type())) {
+                    handler.handle(event.payload());
+                    log.info("Event handled: type={}", event.type());
+                    return;
+                }
+            }
+            
+            log.warn("No handler found for event type: {}", event.type());
+            
         } catch (Exception e) {
-            log.error("Failed to process notification event: {}", json, e);
+            log.error("Failed to process event: {}", json, e);
         }
     }
 }

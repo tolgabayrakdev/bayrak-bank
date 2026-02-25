@@ -75,15 +75,15 @@ public class TransactionService {
 
         Transaction saved = transactionRepository.save(transaction);
 
-        notificationService.createNotification(
-                sender.getUser(),
+        notificationService.publishNotification(
+                sender.getUser().getId(),
                 "Transfer Gönderildi",
                 request.amount() + " TL transfer edildi. Alıcı: " + receiver.getIban() + " | Ref: " + referenceNo,
                 NotificationType.TRANSFER
         );
         if (!isInternal) {
-            notificationService.createNotification(
-                    receiver.getUser(),
+            notificationService.publishNotification(
+                    receiver.getUser().getId(),
                     "Para Transferi Alındı",
                     request.amount() + " TL alındı. Gönderen: " + sender.getIban() + " | Ref: " + referenceNo,
                     NotificationType.TRANSFER

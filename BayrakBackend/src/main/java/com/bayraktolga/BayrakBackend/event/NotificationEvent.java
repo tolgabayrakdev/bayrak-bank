@@ -22,3 +22,6 @@ public class NotificationEvent implements Serializable {
     private String message;
     private NotificationType type;
 }
+
+
+// Event modeli

@@ -53,8 +53,8 @@ public class AuthService {
 
         User savedUser = userRepository.save(user);
 
-        notificationService.createNotification(
-                savedUser,
+        notificationService.publishNotification(
+                savedUser.getId(),
                 "Hoş Geldiniz!",
                 "Bayrak Bank ailesine hoş geldiniz, " + savedUser.getFirstName() + "!",
                 NotificationType.SYSTEM

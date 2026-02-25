@@ -6,7 +6,8 @@ import com.bayraktolga.BayrakBackend.entity.Notification;
 import com.bayraktolga.BayrakBackend.entity.User;
 import com.bayraktolga.BayrakBackend.enums.NotificationType;
 import com.bayraktolga.BayrakBackend.event.NotificationEvent;
-import com.bayraktolga.BayrakBackend.event.NotificationQueuePublisher;
+import com.bayraktolga.BayrakBackend.event.NotificationHandler;
+import com.bayraktolga.BayrakBackend.event.EventPublisher;
 import com.bayraktolga.BayrakBackend.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -22,7 +23,7 @@ import java.util.UUID;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
-    private final NotificationQueuePublisher queuePublisher;
+    private final EventPublisher eventPublisher;
 
     public void publishNotification(UUID userId, String title, String message, NotificationType type) {
         NotificationEvent event = NotificationEvent.builder()
@@ -31,7 +32,7 @@ public class NotificationService {
                 .message(message)
                 .type(type)
                 .build();
-        queuePublisher.publish(event);
+        eventPublisher.publish(NotificationHandler.EVENT_TYPE, event);
     }
 
     @Transactional

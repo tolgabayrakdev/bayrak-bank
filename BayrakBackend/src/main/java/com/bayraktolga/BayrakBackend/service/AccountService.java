@@ -46,8 +46,8 @@ public class AccountService {
 
         Account saved = accountRepository.save(account);
 
-        notificationService.createNotification(
-                user,
+        notificationService.publishNotification(
+                user.getId(),
                 "Yeni Hesap Açıldı",
                 "IBAN: " + iban + " numaralı hesabınız başarıyla açıldı.",
                 NotificationType.SYSTEM

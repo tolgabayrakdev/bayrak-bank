@@ -10,21 +10,22 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class NotificationQueuePublisher {
+public class EventPublisher {
 
-    private static final String NOTIFICATION_QUEUE = "notification:queue";
+    private static final String EVENT_QUEUE = "event:queue";
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
-    public void publish(NotificationEvent event) {
+    public void publish(String type, Object payload) {
         try {
+            AppEvent event = new AppEvent(type, payload);
             String json = objectMapper.writeValueAsString(event);
-            redisTemplate.opsForList().rightPush(NOTIFICATION_QUEUE, json);
-            log.info("Notification event published to Redis queue: {}", event.getTitle());
+            redisTemplate.opsForList().rightPush(EVENT_QUEUE, json);
+            log.info("Event published: type={}", type);
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize notification event", e);
-            throw new RuntimeException("Failed to publish notification event", e);
+            log.error("Failed to serialize event", e);
+            throw new RuntimeException("Failed to publish event", e);
         }
     }
 }
