@@ -5,8 +5,6 @@ import com.bayraktolga.BayrakBackend.dto.response.PageResponse;
 import com.bayraktolga.BayrakBackend.entity.Notification;
 import com.bayraktolga.BayrakBackend.entity.User;
 import com.bayraktolga.BayrakBackend.enums.NotificationType;
-import com.bayraktolga.BayrakBackend.event.NotificationEvent;
-import com.bayraktolga.BayrakBackend.event.NotificationHandler;
 import com.bayraktolga.BayrakBackend.event.EventPublisher;
 import com.bayraktolga.BayrakBackend.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +14,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -26,13 +26,12 @@ public class NotificationService {
     private final EventPublisher eventPublisher;
 
     public void publishNotification(UUID userId, String title, String message, NotificationType type) {
-        NotificationEvent event = NotificationEvent.builder()
-                .userId(userId)
-                .title(title)
-                .message(message)
-                .type(type)
-                .build();
-        eventPublisher.publish(NotificationHandler.EVENT_TYPE, event);
+        Map<String, Object> event = new HashMap<>();
+        event.put("userId", userId.toString());
+        event.put("title", title);
+        event.put("message", message);
+        event.put("type", type.name());
+        eventPublisher.publish("NOTIFICATION", event);
     }
 
     @Transactional

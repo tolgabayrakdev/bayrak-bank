@@ -3,12 +3,17 @@ package com.bayraktolga.BayrakBackend.event;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.util.List;
+import lombok.extern.slf4j.Slf4j;
+
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,24 +26,42 @@ public class EventConsumer {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    private final List<EventHandler> handlers;
+    private final ApplicationContext applicationContext;
 
+    private final Map<String, EventMethod> handlers = new HashMap<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public EventConsumer(StringRedisTemplate redisTemplate, 
-                        ObjectMapper objectMapper, 
-                        List<EventHandler> handlers) {
+                        ObjectMapper objectMapper,
+                        ApplicationContext applicationContext) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
-        this.handlers = handlers;
+        this.applicationContext = applicationContext;
     }
 
     @PostConstruct
-    public void startConsuming() {
+    public void init() {
+        registerHandlers();
         running.set(true);
         executor.submit(this::consume);
-        log.info("Event consumer started with {} handlers", handlers.size());
+        log.info("Event consumer started with {} handlers: {}", handlers.size(), handlers.keySet());
+    }
+
+    private void registerHandlers() {
+        String[] beanNames = applicationContext.getBeanNamesForAnnotation(org.springframework.stereotype.Service.class);
+        
+        for (String beanName : beanNames) {
+            Object bean = applicationContext.getBean(beanName);
+            for (Method method : bean.getClass().getDeclaredMethods()) {
+                ListenEvent annotation = method.getAnnotation(ListenEvent.class);
+                if (annotation != null) {
+                    method.setAccessible(true);
+                    handlers.put(annotation.value(), new EventMethod(bean, method));
+                    log.info("Registered handler: {} -> {}.{}()", annotation.value(), beanName, method.getName());
+                }
+            }
+        }
     }
 
     @PreDestroy
@@ -70,18 +93,22 @@ public class EventConsumer {
         try {
             AppEvent event = objectMapper.readValue(json, AppEvent.class);
             
-            for (EventHandler handler : handlers) {
-                if (handler.getEventType().equals(event.type())) {
-                    handler.handle(event.payload());
-                    log.info("Event handled: type={}", event.type());
-                    return;
-                }
+            EventMethod handler = handlers.get(event.type());
+            if (handler != null) {
+                handler.invoke(event.payload());
+                log.info("Event handled: type={}", event.type());
+            } else {
+                log.warn("No handler found for event type: {}", event.type());
             }
-            
-            log.warn("No handler found for event type: {}", event.type());
             
         } catch (Exception e) {
             log.error("Failed to process event: {}", json, e);
+        }
+    }
+
+    private record EventMethod(Object bean, Method method) {
+        public void invoke(Object payload) throws Exception {
+            method.invoke(bean, payload);
         }
     }
 }

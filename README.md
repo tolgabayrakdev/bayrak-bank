@@ -93,12 +93,12 @@ bayrak-bank/
 │       │   └── MailConfig.java
 │       │
 │       ├── event/
-│       │   ├── AppEvent.java
-│       │   ├── EventPublisher.java
-│       │   ├── EventConsumer.java
-│       │   ├── EventHandler.java
-│       │   ├── NotificationEvent.java
-│       │   └── NotificationHandler.java
+│       │   ├── AppEvent.java           # Generic event (type + payload)
+│       │   ├── EventPublisher.java     # Redis'e event atar
+│       │   ├── EventConsumer.java       # @ListenEvent'li methodları tarar ve çağırır
+│       │   ├── ListenEvent.java         # Annotation (@ListenEvent("TYPE"))
+│       │   └── handlers/
+│       │       └── NotificationHandler.java # Notification handler
 │       │
 │       ├── exception/
 │       │   ├── GlobalExceptionHandler.java
@@ -160,13 +160,40 @@ bayrak-bank/
 - Bildirim listesi ve okundu isaretleme
 - **Redis Queue ile async notification**: Event-driven mimari
 
-#### Event-Driven Notification Mimarisi (Generic Pattern)
+#### Event-Driven Mimarisi (Annotation-Based)
 ```
-┌─────────────┐    ┌────────────────┐    ┌───────────┐    ┌───────────────┐    ┌─────────────┐
-│   Service   │ -> │ EventPublisher │ -> │ Redis     │ -> │ EventConsumer │ -> │   Handler   │
-│             │    │                │    │ Queue     │    │ (type'e göre) │    │ (xxxHandler)│
-└─────────────┘    └────────────────┘    └───────────┘    └───────────────┘    └─────────────┘
+┌─────────────┐    ┌────────────────┐    ┌───────────┐    ┌───────────────┐    ┌──────────────────┐
+│   Service   │ -> │ EventPublisher │ -> │ Redis     │ -> │ EventConsumer │ -> │ @ListenEvent()   │
+│             │    │                │    │ Queue     │    │ (scan eder)   │    │ (method çağırır) │
+└─────────────┘    └────────────────┘    └───────────┘    └───────────────┘    └──────────────────┘
 ```
+
+**Event Sınıfları:**
+
+| Sınıf | İşlev |
+|-------|-------|
+| `AppEvent` | Generic event record (type + payload) |
+| `EventPublisher` | Redis'e event yayınlar |
+| `EventConsumer` | `@ListenEvent` annotation'lu methodları tarar ve çağırır |
+| `ListenEvent` | Event handler annotation |
+| `NotificationEvent` | Notification payload modeli |
+
+**Yeni Event Handler Ekleme (Tek Dosya):**
+
+```java
+@Service
+public class TransferHandler {
+
+    private final TransferService transferService;
+
+    @ListenEvent("TRANSFER")
+    public void handle(TransferEvent event) {
+        // işlem
+    }
+}
+```
+
+> **Not:** Sadece 1 dosya! Payload için ayrı event class'ı istersen oluştur, yoksa Map/record da olur.
 
 **Generic Event Sınıfları:**
 
